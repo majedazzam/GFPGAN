@@ -10,8 +10,7 @@ RUN yum update -y && yum install -y \
 
 # Ninja
 RUN wget https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip && \
-    unzip ninja-linux.zip -d /usr/local/bin/ && \
-    update-alternatives --install /usr/bin/ninja ninja /usr/local/bin/ninja 1 --force
+    unzip ninja-linux.zip -d /usr/local/bin/
 
 # basicsr facexlib
 RUN python3 -m pip install --upgrade pip && \
