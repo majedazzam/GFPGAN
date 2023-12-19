@@ -2,6 +2,8 @@ FROM nvidia/cuda:10.0-cudnn7-devel
 
 WORKDIR /app
 
+RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
+
 RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     # python
     python3.8 python3-pip python3-setuptools python3-dev \
