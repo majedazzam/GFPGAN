@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.0.3-devel-ubi7
+FROM nvidia/cuda:10.0-cudnn7-devel
 
 WORKDIR /app
 
