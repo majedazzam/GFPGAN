@@ -2,17 +2,20 @@ FROM nvidia/cuda:11.0.3-devel-ubi7
 
 WORKDIR /app
 
-RUN yum install -y python38 python38-pip
-
-RUN yum update -y && yum install -y \
-    python38 python38-pip python38-setuptools python38-devel \
-    glib2 libSM libXext libXrender mesa-libGL \
-    gcc-c++ \
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
+    # python
+    python3.8 python3-pip python3-setuptools python3-dev \
+    # OpenCV deps
+    libglib2.0-0 libsm6 libxext6 libxrender1 libgl1-mesa-glx \
+    # c++
+    g++ \
+    # others
     wget unzip
 
 # Ninja
 RUN wget https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip && \
-    unzip ninja-linux.zip -d /usr/local/bin/
+    unzip ninja-linux.zip -d /usr/local/bin/ && \
+    update-alternatives --install /usr/bin/ninja ninja /usr/local/bin/ninja 1 --force
 
 # basicsr facexlib
 RUN python3 -m pip install --upgrade pip && \
