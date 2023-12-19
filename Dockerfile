@@ -2,14 +2,10 @@ FROM nvidia/cuda:11.0.3-devel-ubi7
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
-    # python
-    python3.8 python3-pip python3-setuptools python3-dev \
-    # OpenCV deps
-    libglib2.0-0 libsm6 libxext6 libxrender1 libgl1-mesa-glx \
-    # c++
-    g++ \
-    # others
+RUN yum update -y && yum install -y \
+    python38 python38-pip python38-setuptools python38-devel \
+    glib2 libSM libXext libXrender mesa-libGL \
+    gcc-c++ \
     wget unzip
 
 # Ninja
