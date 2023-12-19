@@ -2,6 +2,8 @@ FROM nvidia/cuda:11.0.3-devel-ubi7
 
 WORKDIR /app
 
+RUN yum install -y python38 python38-pip
+
 RUN yum update -y && yum install -y \
     python38 python38-pip python38-setuptools python38-devel \
     glib2 libSM libXext libXrender mesa-libGL \
