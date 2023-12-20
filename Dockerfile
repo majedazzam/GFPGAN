@@ -1,32 +1,61 @@
 FROM nvidia/cuda:11.1.1-runtime-ubuntu18.04
 
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
-    # python
-    python3.8 python3-pip python3-setuptools python3-dev \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --fix-missing \
     # OpenCV deps
     libglib2.0-0 libsm6 libxext6 libxrender1 libgl1-mesa-glx \
     # c++
     g++ \
     # others
     wget unzip
+WORKDIR /app
+ENV PATH="/root/miniconda3/bin:/root/.local/bin:${PATH}"
+ENV PYTHONPATH="/app"
+
+# Install Miniconda
+ENV CONDA_AUTO_UPDATE_CONDA=false
+ENV PATH=/opt/conda/bin:$PATH
+RUN wget -O ~/miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-py38_4.10.3-Linux-x86_64.sh \
+     && chmod +x ~/miniconda.sh \
+     && ~/miniconda.sh -b -p /opt/conda \
+     && rm ~/miniconda.sh \
+     && /opt/conda/bin/conda clean -ya && \
+     conda install conda-build && \
+     conda build purge && \
+     conda init
 
 # Ninja
-RUN wget https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip && \
+RUN wget https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-linux.zip && \
     unzip ninja-linux.zip -d /usr/local/bin/ && \
     update-alternatives --install /usr/bin/ninja ninja /usr/local/bin/ninja 1 --force
 
 # basicsr facexlib
-RUN python3 -m pip install --upgrade pip && \
-    pip3 install --no-cache-dir torch>=1.7 opencv-python>=4.5 && \
-    pip3 install --no-cache-dir basicsr facexlib realesrgan
+RUN pip install -U pip && \
+    pip install torch==1.8.2+cu111 torchvision==0.9.2+cu111 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html
+
+RUN pip install opencv-python basicsr facexlib realesrgan boto3 python-json-logger uuid
 
 # weights
 RUN wget https://github.com/TencentARC/GFPGAN/releases/download/v0.2.0/GFPGANCleanv1-NoCE-C2.pth \
         -P experiments/pretrained_models &&\
     wget https://github.com/TencentARC/GFPGAN/releases/download/v0.1.0/GFPGANv1.pth \
-        -P experiments/pretrained_models
+        -P experiments/pretrained_models && \
+    wget https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.3.pth \
+        -P experiments/pretrained_models && \
+    wget https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth \
+        -P experiments/pretrained_models && \
+    wget https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/RestoreFormer.pth \
+        -P experiments/pretrained_models && \
+    wget https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/CodeFormer.pth \
+        -P gfpgan/weights && \
+    wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth \
+        -P /usr/local/lib/python3.6/dist-packages/realesrgan/weights/ && \
+    wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth \
+        -P /usr/local/lib/python3.6/dist-packages/weights/ && \
+    wget https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth \
+        -P gfpgan/weights && \
+    wget https://github.com/xinntao/facexlib/releases/download/v0.2.2/parsing_parsenet.pth \
+        -P gfpgan/weights
 
 RUN rm -rf /var/cache/apt/* /var/lib/apt/lists/* && \
     apt-get autoremove -y && apt-get clean
@@ -37,5 +66,4 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY . .
 RUN pip3 install .
 
-
-CMD ["python3", "inference_gfpgan.py", "--upscale", "2", "--test_path", "inputs/whole_imgs", "--save_root", "results"]
+CMD ["python3", "inference_gfpgan.py"]
