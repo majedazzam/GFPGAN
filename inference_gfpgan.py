@@ -124,6 +124,7 @@ def main():
 
     # ------------------------ restore ------------------------
     for img_path in img_list:
+            print(f'Trying to load image: {img_path}')
         # read image
         img_name = os.path.basename(img_path)
         print(f'Processing {img_name} ...')
