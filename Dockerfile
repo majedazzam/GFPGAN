@@ -29,6 +29,7 @@ RUN chmod +x ~/miniconda.sh && \
 
 # Configure Conda
 RUN /opt/conda/bin/conda clean -ya && \
+    conda update -n base -c defaults conda && \
     conda install conda-build && \
     conda build purge && \
     conda init
