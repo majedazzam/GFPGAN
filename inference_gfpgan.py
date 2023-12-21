@@ -123,8 +123,20 @@ def main():
         bg_upsampler=bg_upsampler)
 
     # ------------------------ restore ------------------------
+
+    img_dir = 'inputs/cropped_faces'
+    if os.path.isdir(img_dir):
+        img_list = glob.glob(os.path.join(img_dir, '*'))  # This will list all files in the directory
+    else:
+        img_list = [img_dir]  # If it's a single file, not a directory
+
     for img_path in img_list:
         print(f'Trying to load image: {img_path}')
+        input_img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+        if input_img is None:
+         print(f'Failed to load image: {img_path}')
+        continue  # Skip this file and continue with the next
+
         # read image
         img_name = os.path.basename(img_path)
         print(f'Processing {img_name} ...')
