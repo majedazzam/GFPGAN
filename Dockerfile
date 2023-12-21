@@ -30,8 +30,12 @@ RUN chmod +x ~/miniconda.sh && \
 # Configure Conda
 RUN /opt/conda/bin/conda clean -ya && \
     conda update -n base -c defaults conda && \
-    conda install conda-build && \
-    conda build purge && \
+    /opt/conda/bin/conda clean -ya
+
+RUN conda config --add channels conda-forge && \
+    conda install conda-build
+
+RUN conda build purge && \
     conda init
 
 # Ninja
