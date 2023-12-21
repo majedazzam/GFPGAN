@@ -134,8 +134,8 @@ def main():
         print(f'Trying to load image: {img_path}')
         input_img = cv2.imread(img_path, cv2.IMREAD_COLOR)
         if input_img is None:
-         print(f'Failed to load image: {img_path}')
-        continue  # Skip this file and continue with the next
+            print(f'Failed to load image: {img_path}')
+            continue  # Skip this file and continue with the next
 
         # read image
         img_name = os.path.basename(img_path)
