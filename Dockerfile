@@ -15,14 +15,23 @@ ENV PYTHONPATH="/app"
 # Install Miniconda
 ENV CONDA_AUTO_UPDATE_CONDA=false
 ENV PATH=/opt/conda/bin:$PATH
-RUN wget -O ~/miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-py38_4.10.3-Linux-x86_64.sh \
-     && chmod +x ~/miniconda.sh \
-     && ~/miniconda.sh -b -p /opt/conda \
-     && rm ~/miniconda.sh \
-     && /opt/conda/bin/conda clean -ya && \
-     conda install conda-build && \
-     conda build purge && \
-     conda init
+
+# Install wget and other necessary tools (if not already present)
+RUN apt-get update && apt-get install -y wget
+
+# Download Miniconda installer
+RUN wget -O ~/miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-py38_4.10.3-Linux-x86_64.sh
+
+# Install Miniconda
+RUN chmod +x ~/miniconda.sh && \
+    ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+
+# Configure Conda
+RUN /opt/conda/bin/conda clean -ya && \
+    conda install conda-build && \
+    conda build purge && \
+    conda init
 
 # Ninja
 RUN wget https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-linux.zip && \
