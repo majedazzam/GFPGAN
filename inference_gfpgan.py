@@ -1,187 +1,182 @@
-import argparse
+import boto3
 import cv2
 import glob
 import numpy as np
 import os
-import torch
-from basicsr.utils import imwrite
+import json
+import requests
+import logging
+import time
+import uuid
 
+from pythonjsonlogger import jsonlogger
+from basicsr.utils import imwrite
+from pathlib import Path
 from gfpgan import GFPGANer
 
+sqs = boto3.resource("sqs")
+queue = sqs.get_queue_by_name(QueueName=os.environ["SQS_QUEUE_NAME"])
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["DYNAMODB_TABLE_NAME"])
+s3 = boto3.client("s3")
 
-def main():
-    """Inference demo for GFPGAN (for users).
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '-i',
-        '--input',
-        type=str,
-        default='inputs/whole_imgs',
-        help='Input image or folder. Default: inputs/whole_imgs')
-    parser.add_argument('-o', '--output', type=str, default='results', help='Output folder. Default: results')
-    # we use version to select models, which is more user-friendly
-    parser.add_argument(
-        '-v', '--version', type=str, default='1.4', help='GFPGAN model version. Option: 1 | 1.2 | 1.3 | 1.4 | RestoreFormer. Default: 1.4')
-    parser.add_argument(
-        '-s', '--upscale', type=int, default=2, help='The final upsampling scale of the image. Default: 2')
+for name in ["boto", "urllib3", "s3transfer", "boto3", "botocore", "nose"]:
+    logging.getLogger(name).setLevel(logging.CRITICAL)
 
-    parser.add_argument(
-        '--bg_upsampler', type=str, default='realesrgan', help='background upsampler. Default: realesrgan')
-    parser.add_argument(
-        '--bg_tile',
-        type=int,
-        default=400,
-        help='Tile size for background sampler, 0 for no tile during testing. Default: 400')
-    parser.add_argument('--suffix', type=str, default=None, help='Suffix of the restored faces')
-    parser.add_argument('--only_center_face', action='store_true', help='Only restore the center face')
-    parser.add_argument('--aligned', action='store_true', help='Input are aligned faces')
-    parser.add_argument(
-        '--ext',
-        type=str,
-        default='auto',
-        help='Image extension. Options: auto | jpg | png, auto means using the same extension as inputs. Default: auto')
-    parser.add_argument('-w', '--weight', type=float, default=0.5, help='Adjustable weights.')
-    args = parser.parse_args()
+def setup_logging(log_level):
+    logger = logging.getLogger()
 
-    args = parser.parse_args()
+    logger.setLevel(log_level)
+    json_handler = logging.StreamHandler()
+    formatter = jsonlogger.JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    json_handler.setFormatter(formatter)
+    logger.addHandler(json_handler)
 
-    # ------------------------ input & output ------------------------
-    if args.input.endswith('/'):
-        args.input = args.input[:-1]
-    if os.path.isfile(args.input):
-        img_list = [args.input]
-    else:
-        img_list = sorted(glob.glob(os.path.join(args.input, '*')))
+def main(logger, message):
+    [f.unlink() for f in Path("./inputs").glob("*") if f.is_file()]
+    [f.unlink() for f in Path("./results").glob("*") if f.is_file()]
 
-    os.makedirs(args.output, exist_ok=True)
+    model_path = "experiments/pretrained_models/GFPGANCleanv1-NoCE-C2.pth"
+    upscale = 2
+    arch = "clean"
+    channel = 2
+    ext = "auto"
+    suffix = None
+    save_root = "results"
+    os.makedirs(save_root, exist_ok=True)
 
-    # ------------------------ set up background upsampler ------------------------
-    if args.bg_upsampler == 'realesrgan':
-        if not torch.cuda.is_available():  # CPU
-            import warnings
-            warnings.warn('The unoptimized RealESRGAN is slow on CPU. We do not use it. '
-                          'If you really want to use it, please modify the corresponding codes.')
-            bg_upsampler = None
-        else:
-            from basicsr.archs.rrdbnet_arch import RRDBNet
-            from realesrgan import RealESRGANer
-            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
-            bg_upsampler = RealESRGANer(
-                scale=2,
-                model_path='https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
-                model=model,
-                tile=args.bg_tile,
-                tile_pad=10,
-                pre_pad=0,
-                half=True)  # need to set False in CPU mode
-    else:
-        bg_upsampler = None
+    inputs_path = os.path.join("inputs", "input.jpg")
 
-    # ------------------------ set up GFPGAN restorer ------------------------
-    if args.version == '1':
-        arch = 'original'
-        channel_multiplier = 1
-        model_name = 'GFPGANv1'
-        url = 'https://github.com/TencentARC/GFPGAN/releases/download/v0.1.0/GFPGANv1.pth'
-    elif args.version == '1.2':
-        arch = 'clean'
-        channel_multiplier = 2
-        model_name = 'GFPGANCleanv1-NoCE-C2'
-        url = 'https://github.com/TencentARC/GFPGAN/releases/download/v0.2.0/GFPGANCleanv1-NoCE-C2.pth'
-    elif args.version == '1.3':
-        arch = 'clean'
-        channel_multiplier = 2
-        model_name = 'GFPGANv1.3'
-        url = 'https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.3.pth'
-    elif args.version == '1.4':
-        arch = 'clean'
-        channel_multiplier = 2
-        model_name = 'GFPGANv1.4'
-        url = 'https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth'
-    elif args.version == 'RestoreFormer':
-        arch = 'RestoreFormer'
-        channel_multiplier = 2
-        model_name = 'RestoreFormer'
-        url = 'https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/RestoreFormer.pth'
-    else:
-        raise ValueError(f'Wrong model version {args.version}.')
+    img_data = requests.get(url=message["imageUrl"]).content
 
-    # determine model paths
-    model_path = os.path.join('experiments/pretrained_models', model_name + '.pth')
-    if not os.path.isfile(model_path):
-        model_path = os.path.join('gfpgan/weights', model_name + '.pth')
-    if not os.path.isfile(model_path):
-        # download pre-trained models from url
-        model_path = url
+    logger.info(f"Downloading image {message['imageUrl']} to {inputs_path}")
+
+    try:
+        with open(inputs_path, "wb") as handler:
+            handler.write(img_data)
+    except:
+        logger.error('Cannot download file')
+        return
 
     restorer = GFPGANer(
         model_path=model_path,
-        upscale=args.upscale,
+        upscale=upscale,
         arch=arch,
-        channel_multiplier=channel_multiplier,
-        bg_upsampler=bg_upsampler)
+        channel_multiplier=channel,
+        bg_upsampler=None,
+    )
 
-    # ------------------------ restore ------------------------
-
-    img_dir = 'inputs/cropped_faces'
-    if os.path.isdir(img_dir):
-        img_list = glob.glob(os.path.join(img_dir, '*'))  # This will list all files in the directory
-    else:
-        img_list = [img_dir]  # If it's a single file, not a directory
-
+    img_list = sorted(glob.glob(os.path.join("inputs", "*")))
     for img_path in img_list:
-        print(f'Trying to load image: {img_path}')
-        input_img = cv2.imread(img_path, cv2.IMREAD_COLOR)
-        if input_img is None:
-            print(f'Failed to load image: {img_path}')
-            continue  # Skip this file and continue with the next
-
         # read image
         img_name = os.path.basename(img_path)
-        print(f'Processing {img_name} ...')
+        logger.info(f"Processing {img_name} ...")
         basename, ext = os.path.splitext(img_name)
         input_img = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
         # restore faces and background if necessary
         cropped_faces, restored_faces, restored_img = restorer.enhance(
-            input_img,
-            has_aligned=args.aligned,
-            only_center_face=args.only_center_face,
-            paste_back=True,
-            weight=args.weight)
+            input_img, has_aligned=False, only_center_face=True, paste_back=True
+        )
 
         # save faces
-        for idx, (cropped_face, restored_face) in enumerate(zip(cropped_faces, restored_faces)):
+        for idx, (cropped_face, restored_face) in enumerate(
+            zip(cropped_faces, restored_faces)
+        ):
             # save cropped face
-            save_crop_path = os.path.join(args.output, 'cropped_faces', f'{basename}_{idx:02d}.png')
+            save_crop_path = os.path.join(
+                save_root, "cropped_faces", f"{basename}_{idx:02d}.png"
+            )
             imwrite(cropped_face, save_crop_path)
             # save restored face
-            if args.suffix is not None:
-                save_face_name = f'{basename}_{idx:02d}_{args.suffix}.png'
+            if suffix is not None:
+                save_face_name = f"{basename}_{idx:02d}_{suffix}.png"
             else:
-                save_face_name = f'{basename}_{idx:02d}.png'
-            save_restore_path = os.path.join(args.output, 'restored_faces', save_face_name)
+                save_face_name = f"{basename}_{idx:02d}.png"
+            save_restore_path = os.path.join(
+                save_root, "restored_faces", save_face_name
+            )
             imwrite(restored_face, save_restore_path)
             # save comparison image
             cmp_img = np.concatenate((cropped_face, restored_face), axis=1)
-            imwrite(cmp_img, os.path.join(args.output, 'cmp', f'{basename}_{idx:02d}.png'))
+            imwrite(
+                cmp_img, os.path.join(save_root, "cmp", f"{basename}_{idx:02d}.png")
+            )
 
-        # save restored img
         if restored_img is not None:
-            if args.ext == 'auto':
+            if ext == "auto":
                 extension = ext[1:]
             else:
-                extension = args.ext
+                extension = ext
 
-            if args.suffix is not None:
-                save_restore_path = os.path.join(args.output, 'restored_imgs', f'{basename}_{args.suffix}.{extension}')
+            if suffix is not None:
+                save_restore_path = os.path.join(
+                    save_root, "restored_imgs", f"{basename}_{suffix}.{extension}"
+                )
             else:
-                save_restore_path = os.path.join(args.output, 'restored_imgs', f'{basename}.{extension}')
+                save_restore_path = os.path.join(
+                    save_root, "restored_imgs", f"{basename}.{extension}"
+                )
+
+            logger.info(f"Saving restored image to {save_restore_path} ...")
+
             imwrite(restored_img, save_restore_path)
 
-    print(f'Results are in the [{args.output}] folder.')
+    s3key = f'gfpgan_{message["orgId"]}_{uuid.uuid4().hex}.jpg'
+    s3.upload_file(
+        "results/restored_imgs/input..jpg", os.environ["S3_BUCKET_NAME"], s3key
+    )
+    new_record = message.copy()
+    new_record["enhancedImageS3Key"] = s3key
+    new_record["updatedAt"] = round(time.time())
+    new_record["timeTaken"] = new_record["updatedAt"] - new_record["createdAt"]
+    update_record(new_record)
+    logger.info(f"Result uploaded in S3: {s3key}")
 
 
-if __name__ == '__main__':
-    main()
+def create_record(message):
+    response = table.put_item(
+        Item={
+            "enhancementId": message["enhancementId"],
+            "imageUrl": message["imageUrl"],
+            "createdAt": message["createdAt"],
+        }
+    )
+    return response
+
+
+def update_record(message):
+    response = table.put_item(
+        Item={
+            "enhancementId": message["enhancementId"],
+            "imageUrl": message["imageUrl"],
+            "createdAt": message["createdAt"],
+            # Additional Props
+            "enhancedImageS3Key": message["enhancedImageS3Key"],
+            "updatedAt": message["updatedAt"],
+            "timeTaken": message["timeTaken"],
+        }
+    )
+    return response
+
+def retrieve_messages():
+    setup_logging(logging.INFO)
+    logger = logging.getLogger()
+    logger.info("Starting retrieve_messages")
+    while True:
+        logger.debug("Fetching SQS messages")
+        messages = queue.receive_messages(MaxNumberOfMessages=1, WaitTimeSeconds=1)
+        for message in messages:
+            parsed_message = json.loads(message.body)
+            parsed_message["createdAt"] = round(time.time())
+            logger.info(parsed_message)
+            create_record(parsed_message)
+            main(logger, parsed_message)
+            message.delete()
+        time.sleep(5)
+
+
+if __name__ == "__main__":
+    retrieve_messages()
