@@ -38,7 +38,7 @@ def main(logger, message):
     [f.unlink() for f in Path("./inputs").glob("*") if f.is_file()]
     [f.unlink() for f in Path("./results").glob("*") if f.is_file()]
 
-    model_path = "experiments/pretrained_models/GFPGANv1.4.pth"
+    model_path = "GFPGANv1.4.pth"
     upscale = 2
     arch = "clean"
     channel = 2
